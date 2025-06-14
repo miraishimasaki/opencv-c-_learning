@@ -2,7 +2,9 @@
 #pragma once
 #include <iostream>
 #include <opencv2/opencv.hpp>
-#include <opencv2/video/tracking.hpp>
+#include<opencv2/tracking/tracking.hpp>
+#include<opencv2/tracking/tracking_legacy.hpp>
+#include<string>
 
 
 using namespace cv;
@@ -60,7 +62,7 @@ int facedetect() {
 
 
 //function to detect russian plates in an image
-int platesdetect(const char* path,bool output= 0) {
+int platesdetect(string path,bool output= 0) {
 	CascadeClassifier plate_cascade;
 	// Load the cascade classifier,change the path to your own
 	if (!plate_cascade.load("D:\\source\\OpenCV4110\\opencv\\sources\\data\\haarcascades\\haarcascade_russian_plate_number.xml")) {
@@ -111,7 +113,7 @@ int live_canny() {
 
 
 //function to overlay an image on another image using alpha blending
-int ar_overlay(const char* sourse, const char* overlay,bool output= 0 ) {
+int ar_overlay(string sourse, string overlay,bool output= 0 ) {
 	Mat img_src = imread(sourse, IMREAD_COLOR);
 	Mat img_overlay = imread(overlay, IMREAD_UNCHANGED);
 
@@ -138,7 +140,7 @@ int ar_overlay(const char* sourse, const char* overlay,bool output= 0 ) {
 }
 
 //function to apply various filters to an image.1 Guassian blur 2 Canny edge 3 Gray filter
-int filter(const char* path, int filter_type, bool output = 0) {
+int filter(string path, int filter_type, bool output = 0) {
 	Mat img = imread(path, IMREAD_COLOR);
 	if (img.empty()) file_fail();
 	Mat dst;
@@ -195,10 +197,110 @@ int LiveMotionDetection()
 	return 0;
 }
 
-int MultiTracking() {
-	VideoCapture cap(0);
-	if (!cap.isOpened()) camera_fail();
-	
+int ObjsTracking(string path="") {
+	cv::VideoCapture cap;
+	if (path == "") {
+		cap.open(0);
+	}
+	else {
+		cap.open(path);
+	}
+	if (!cap.isOpened()) {
+		cout << "Cannot open the video file" << endl;
+		return -1;
+	}
+
+	cv::Mat frame;
+
+	cap >> frame;
+	//cv::resize(frame, frame, cv::Size(480, 480));
+	if (frame.empty()) {
+		cout << "Cannot read a frame from the video file" << endl;
+		return -1;
+	}
+	cv::Ptr<cv::legacy::MultiTracker> multiTracker = cv::legacy::MultiTracker::create();
+	vector<cv::Rect> bboxes;
+	selectROIs("Select ROIs", frame, bboxes);
+	for (const auto& bbox : bboxes) {
+		multiTracker->add(cv::legacy::TrackerKCF::create(), frame, bbox);//KCF is the fastest  among all the trackers
+	}
+	while (true) {
+		cap >> frame;
+
+		if (frame.empty()) {
+			break;
+		}
+		//cv::resize(frame, frame, cv::Size(480, 480));
+		multiTracker->update(frame);
+		for (const auto& bbox : multiTracker->getObjects()) {
+			rectangle(frame, bbox, cv::Scalar(255, 0, 0), 2, 1);
+		}
+		cv::imshow("Multi-Object Tracking", frame);
+		if (cv::waitKey(1) == 27) break; // ESC key to exit
+
+	}
+	cap.release();
+	cv::destroyAllWindows();
+	return 0;
+}
+
+int video_division(string path, int num_parts) {
+	VideoCapture cap(path);
+	if (!cap.isOpened()) file_fail();
+	Mat frame;
+	int frame_count = 0;
+	int fourcc = VideoWriter::fourcc('X', 'V', 'I', 'D');
+	double fps;
+	int width, height;
+	fps = cap.get(cv::CAP_PROP_FPS);
+	width = static_cast<int>(cap.get(cv::CAP_PROP_FRAME_WIDTH));
+	height = static_cast<int>(cap.get(cv::CAP_PROP_FRAME_HEIGHT));
+	//frame_count = get_frame(cap);
+	frame_count = static_cast<int>(cap.get(cv::CAP_PROP_FRAME_COUNT));
+	int part_size = frame_count / num_parts;
+	int start_frame = 0;
+	int end_frame = part_size;
+	for (int i = 0; i < num_parts; i++) {
+		VideoWriter writer;
+		string filename = "part" + to_string(i + 1) + ".avi";
+		writer.open(filename, fourcc, fps, Size(width, height));
+		if (!writer.isOpened()) {
+			cout << "Cannot open the output video file" << endl;
+			return -1;
+		}
+		cap.set(cv::CAP_PROP_POS_FRAMES, start_frame);
+		while (true) {
+			cap >> frame;
+			if (frame.empty()) break;
+			writer.write(frame);
+			if (cap.get(cv::CAP_PROP_POS_FRAMES) == end_frame) { 
+				cout << "Part " << i + 1 << " has been written to file" << endl;
+				break;
+			}
+		}
+		writer.release();
+		start_frame = end_frame;
+		end_frame += part_size;
+		if (end_frame > frame_count) end_frame = frame_count;
+	}
+	cap.release();
+	cout << "Video has been divided into " << num_parts << " parts" << endl;
+	return 0;
+
+}
+
+//a poor method to get the frame count of a video
+int get_frame(VideoCapture& cap) {
+	Mat frame;
+	int frame_count = 0;
+	while (true) {
+		cap >> frame;
+		if (frame.empty()) { break; }
+		frame_count++;
+	}
+	return frame_count;
+
+}
 	
 	
 
